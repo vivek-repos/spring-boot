@@ -27,12 +27,12 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import org.apache.commons.lang3.StringUtils;
 import org.apache.maven.artifact.Artifact;
 import org.apache.maven.execution.MavenSession;
 import org.apache.maven.model.Resource;
@@ -65,6 +65,8 @@ import org.springframework.boot.loader.tools.MainClassFinder;
 public abstract class AbstractRunMojo extends AbstractDependencyFilterMojo {
 
 	private static final String SPRING_BOOT_APPLICATION_CLASS_NAME = "org.springframework.boot.autoconfigure.SpringBootApplication";
+
+	private static final String MAVEN_REPO_LOCAL = "${maven.repo.local}";
 
 	/**
 	 * The Maven project.
@@ -229,11 +231,12 @@ public abstract class AbstractRunMojo extends AbstractDependencyFilterMojo {
 	private boolean skip;
 
 	/**
-	 * Repeated paths in classpath string that should be replaced with a shorter soft link.
+	 * Repeated paths in classpath string that should be replaced with a shorter soft
+	 * link.
 	 * @since 1.0
 	 */
 	@Parameter
-	private List<DependencyPath> dependencyPaths;
+	private File dependencyPaths;
 
 	/**
 	 * Classpath with repeated paths replaced with soft link.
@@ -435,16 +438,40 @@ public abstract class AbstractRunMojo extends AbstractDependencyFilterMojo {
 				}
 				classpath.append(new File(ele.toURI()));
 			}
+			String mavenLocalRepo = System.getProperty("maven.repo.local");
+			String osName = System.getProperty("os.name").toLowerCase();
 			this.windowsClassPath = classpath.toString();
-			if (this.dependencyPaths != null) {
-				for (DependencyPath path : this.dependencyPaths) {
-					this.windowsClassPath = StringUtils.replace(this.windowsClassPath, path.getOldPath(),
-							path.getNewPath());
-					Path link = Paths.get(path.getNewPath());
-					if (!Files.exists(link)) {
-						Runtime.getRuntime().exec("cmd /c mklink /J " + path.getNewPath() + " " + path.getOldPath());
-					}
+			if (osName.contains("windows") && this.dependencyPaths != null && mavenLocalRepo != null) {
+				Map<String, String> dPaths = new HashMap<>();
+				try {
+					List<String> allLines = Files.readAllLines(this.dependencyPaths.toPath());
+					allLines.forEach((line) -> {
+						line = line.replace(MAVEN_REPO_LOCAL, Paths.get(mavenLocalRepo).toString());
+						String[] depPaths = line.split("=");
+						if (depPaths.length == 2) {
+							dPaths.put(depPaths[0], depPaths[1]);
+						}
+					});
 				}
+				catch (IOException ex) {
+					ex.printStackTrace();
+				}
+				dPaths.forEach((oldPath, newPath) -> {
+					this.windowsClassPath = this.windowsClassPath.replace(Paths.get(oldPath).toString(), newPath);
+					Path link = Paths.get(newPath);
+					if (!Files.exists(link)) {
+						try {
+							Runtime.getRuntime()
+									.exec("cmd /c mklink /J " + newPath + " " + Paths.get(oldPath).toString());
+						}
+						catch (IOException ioe) {
+							this.windowsClassPath = classpath.toString();
+							if (getLog().isDebugEnabled()) {
+								getLog().debug("Junction creation failed. Using original classpath without softlink.");
+							}
+						}
+					}
+				});
 			}
 			if (getLog().isDebugEnabled()) {
 				getLog().debug("Classpath for forked process: " + this.windowsClassPath);
