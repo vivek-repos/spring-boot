@@ -449,9 +449,6 @@ public abstract class AbstractRunMojo extends AbstractDependencyFilterMojo {
 			}
 			String mavenLocalRepo = (System.getProperty("maven.repo.local") == null) ? null
 					: Paths.get(System.getProperty("maven.repo.local")).toString();
-			if (System.getProperty("junction.path") != null) {
-				this.junctionPath = Paths.get(System.getProperty("junction.path")).toString();
-			}
 			if (this.junctionPath.endsWith(File.separator) || this.junctionPath.endsWith("/")) {
 				this.junctionPath = this.junctionPath.substring(0, this.junctionPath.length() - 1);
 			}
