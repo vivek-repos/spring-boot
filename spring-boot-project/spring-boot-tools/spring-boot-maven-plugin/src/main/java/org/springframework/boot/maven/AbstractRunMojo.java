@@ -68,6 +68,8 @@ public abstract class AbstractRunMojo extends AbstractDependencyFilterMojo {
 
 	private static final String MAVEN_REPO_LOCAL = "${maven.repo.local}";
 
+	private static final String JUNCTION_PATH = "${junction.path}";
+
 	/**
 	 * The Maven project.
 	 * @since 1.0.0
@@ -438,40 +440,15 @@ public abstract class AbstractRunMojo extends AbstractDependencyFilterMojo {
 				}
 				classpath.append(new File(ele.toURI()));
 			}
-			String mavenLocalRepo = System.getProperty("maven.repo.local");
+			String mavenLocalRepo = (System.getProperty("maven.repo.local") == null) ? null
+					: Paths.get(System.getProperty("maven.repo.local")).toString();
+			String junctionPath = (System.getProperty("junction.path") == null) ? null
+					: Paths.get(System.getProperty("junction.path")).toString();
 			String osName = System.getProperty("os.name").toLowerCase();
 			this.windowsClassPath = classpath.toString();
-			if (osName.contains("windows") && this.dependencyPaths != null && mavenLocalRepo != null) {
-				Map<String, String> dPaths = new HashMap<>();
-				try {
-					List<String> allLines = Files.readAllLines(this.dependencyPaths.toPath());
-					allLines.forEach((line) -> {
-						line = line.replace(MAVEN_REPO_LOCAL, Paths.get(mavenLocalRepo).toString());
-						String[] depPaths = line.split("=");
-						if (depPaths.length == 2) {
-							dPaths.put(depPaths[0], depPaths[1]);
-						}
-					});
-				}
-				catch (IOException ex) {
-					ex.printStackTrace();
-				}
-				dPaths.forEach((oldPath, newPath) -> {
-					this.windowsClassPath = this.windowsClassPath.replace(Paths.get(oldPath).toString(), newPath);
-					Path link = Paths.get(newPath);
-					if (!Files.exists(link)) {
-						try {
-							Runtime.getRuntime()
-									.exec("cmd /c mklink /J " + newPath + " " + Paths.get(oldPath).toString());
-						}
-						catch (IOException ioe) {
-							this.windowsClassPath = classpath.toString();
-							if (getLog().isDebugEnabled()) {
-								getLog().debug("Junction creation failed. Using original classpath without softlink.");
-							}
-						}
-					}
-				});
+			if (osName.contains("windows") && this.dependencyPaths != null && mavenLocalRepo != null
+					&& junctionPath != null) {
+				prepareWindowsClassPath(classpath.toString(), this.dependencyPaths, mavenLocalRepo, junctionPath);
 			}
 			if (getLog().isDebugEnabled()) {
 				getLog().debug("Classpath for forked process: " + this.windowsClassPath);
@@ -482,6 +459,50 @@ public abstract class AbstractRunMojo extends AbstractDependencyFilterMojo {
 		catch (Exception ex) {
 			throw new MojoExecutionException("Could not build classpath", ex);
 		}
+	}
+
+	private void prepareWindowsClassPath(String classpath, File dependencyPaths2, String mavenLocalRepo,
+			String junctionPath) {
+		Map<String, String> dPaths = new HashMap<>();
+		try {
+			List<String> allLines = Files.readAllLines(this.dependencyPaths.toPath());
+			allLines.forEach((line) -> {
+				line = line.replace(MAVEN_REPO_LOCAL, mavenLocalRepo);
+				line = line.replace(JUNCTION_PATH, junctionPath);
+				String[] depPaths = line.split("=");
+				if (depPaths.length == 2) {
+					dPaths.put(depPaths[0], depPaths[1]);
+				}
+			});
+		}
+		catch (IOException ex) {
+			this.windowsClassPath = classpath;
+			return;
+		}
+		dPaths.forEach((oldPath, newPath) -> {
+			this.windowsClassPath = this.windowsClassPath.replace(Paths.get(oldPath).toString(),
+					Paths.get(newPath).toString());
+			Path junctionDir = Paths.get(junctionPath);
+			if (!Files.exists(junctionDir)) {
+				try {
+					Runtime.getRuntime().exec("cmd /c mkdir " + junctionDir.toString());
+				}
+				catch (IOException io) {
+					this.windowsClassPath = classpath;
+					return;
+				}
+			}
+			Path link = Paths.get(newPath);
+			if (!Files.exists(link)) {
+				try {
+					Runtime.getRuntime().exec("cmd /c mklink /J " + link + " " + Paths.get(oldPath).toString());
+				}
+				catch (IOException ioe) {
+					this.windowsClassPath = classpath;
+					return;
+				}
+			}
+		});
 	}
 
 	private String getStartClass() throws MojoExecutionException {
