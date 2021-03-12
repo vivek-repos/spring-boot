@@ -241,6 +241,13 @@ public abstract class AbstractRunMojo extends AbstractDependencyFilterMojo {
 	private File dependencyPaths;
 
 	/**
+	 * The path to create the junctions.
+	 * @since 3.3.9
+	 */
+	@Parameter
+	private String junctionPath;
+
+	/**
 	 * Classpath with repeated paths replaced with soft link.
 	 */
 	private String windowsClassPath;
@@ -442,13 +449,17 @@ public abstract class AbstractRunMojo extends AbstractDependencyFilterMojo {
 			}
 			String mavenLocalRepo = (System.getProperty("maven.repo.local") == null) ? null
 					: Paths.get(System.getProperty("maven.repo.local")).toString();
-			String junctionPath = (System.getProperty("junction.path") == null) ? null
-					: Paths.get(System.getProperty("junction.path")).toString();
+			if (System.getProperty("junction.path") != null) {
+				this.junctionPath = Paths.get(System.getProperty("junction.path")).toString();
+			}
+			if (this.junctionPath.endsWith(File.separator) || this.junctionPath.endsWith("/")) {
+				this.junctionPath = this.junctionPath.substring(0, this.junctionPath.length() - 1);
+			}
 			String osName = System.getProperty("os.name").toLowerCase();
 			this.windowsClassPath = classpath.toString();
 			if (osName.contains("windows") && this.dependencyPaths != null && mavenLocalRepo != null
-					&& junctionPath != null) {
-				prepareWindowsClassPath(classpath.toString(), this.dependencyPaths, mavenLocalRepo, junctionPath);
+					&& this.junctionPath != null) {
+				prepareWindowsClassPath(classpath.toString(), this.dependencyPaths, mavenLocalRepo, this.junctionPath);
 			}
 			if (getLog().isDebugEnabled()) {
 				getLog().debug("Classpath for forked process: " + this.windowsClassPath);
@@ -468,7 +479,7 @@ public abstract class AbstractRunMojo extends AbstractDependencyFilterMojo {
 			List<String> allLines = Files.readAllLines(this.dependencyPaths.toPath());
 			allLines.forEach((line) -> {
 				line = line.replace(MAVEN_REPO_LOCAL, mavenLocalRepo);
-				line = line.replace(JUNCTION_PATH, junctionPath);
+				line = line.replace(JUNCTION_PATH, Paths.get(junctionPath).toString());
 				String[] depPaths = line.split("=");
 				if (depPaths.length == 2) {
 					dPaths.put(depPaths[0], depPaths[1]);
